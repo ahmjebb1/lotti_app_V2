@@ -186,8 +186,31 @@ class GetCallsPage(Frame):
                                     #sr - target sampling rate
                                 y, sr = librosa.load(folder_path + call, offset = start, duration = 0.6, sr = 48000)
 
+                                # --- Simplified waveform plot debug (Step 1) ---
+                                waveform_debug_path = os.path.join(os.getcwd(), "debug_waveform")
+                                if not os.path.exists(waveform_debug_path):
+                                    os.makedirs(waveform_debug_path)
+
+                                sanitized_filename = re.sub(r'[<>:"/\\|?*]', '', call_id)
+
+                                # Use the waveform `y` and sample rate `sr` from earlier in the pipeline
+                                # Only process for the first file
+                                if len(images) > 0:
+                                    # Plot and save waveform
+                                    plt.figure(figsize=(10, 3))
+                                    plt.plot(y, color='gray')
+                                    plt.title(f"Waveform before noise reduction: {sanitized_filename}")
+                                    plt.xlabel("Samples")
+                                    plt.ylabel("Amplitude")
+                                    plt.tight_layout()
+
+                                    waveform_plot_file = os.path.join(waveform_debug_path, f"{sanitized_filename}_waveform.png")
+                                    plt.savefig(waveform_plot_file)
+                                    plt.close()
+
                                 ## Noisereduce
                                 #AJ Switched n_fft from 512 to 768 (1.5 x original value)
+                                #AJ debugging switched n_fft to 1024
                                 # nr.reduce_noise reduces noise in bioacoustics using a method called spectral gating. The 
                                 # parameters are as follows:
                                     # thresh_n_mult_nonstationary: Non-stationary Noise Reduction: Continuously updates the 
@@ -205,6 +228,7 @@ class GetCallsPage(Frame):
                                 # Compute the Mel spectrogram
                                 #AJ Switched n_fft from 512 to 768 (1.5 x original value)
                                 #AJ changed fmin 2000 to 5000)
+                                #AJ debugging: AJ switched fmin back to 2000, n_fft to 1024 and hop_length to 256
                                 #
                                     # computing a mel spectrogram using a time-series input
                                     # sr = sampling rate
@@ -213,7 +237,10 @@ class GetCallsPage(Frame):
                                     # n_mels:number of Mel bands to generate, 
                                     # fmin: lowest frequency (in Hz) 
                                     # fmax: highest frequency (in Hz)
-                                S = librosa.feature.melspectrogram(y = y, sr=sr, n_fft=768, hop_length=16, n_mels=128, fmin=5000, fmax=11000)
+                                S = librosa.feature.melspectrogram(y = y, sr=sr, n_fft = 768, hop_length=16, n_mels=128, fmin=5000, fmax=11000)
+
+                                # === Normalize using decibel scale ===
+                                S_dB = librosa.amplitude_to_db(S, ref=np.max)
 
                                 # Convert to magnitude spectrogram (dB)
                                 #AJ
@@ -324,7 +351,7 @@ class GetCallsPage(Frame):
                         pickle.dump(Y_calls, f)
 
                     print(f"Data saved to {output_folder}")
-
+    
     def save_images(self, images, filenames, meta_data_var_label):
                     """
                     Save an array of images as PNG files.
@@ -336,16 +363,40 @@ class GetCallsPage(Frame):
                     Raises:
                         ValueError: If the length of `filenames` does not match the number of images in `images`.
                     """
-                    if len(images) != len(filenames):
-                        raise ValueError("The length of `filenames` must match the number of images in `images`.")
+                    #if len(images) != len(filenames):
+                    #    raise ValueError("The length of `filenames` must match the number of images in `images`.")
                     
                     # Create the folder if it doesn't exist
                     output_folder = os.path.join(os.getcwd(), f"{meta_data_var_label}_images")
                     if not os.path.exists(output_folder):
                         os.makedirs(output_folder)
 
+                    # Debugging- only log debug info for the first image (if any exist)
+                    if len(images) > 0:
+                        img = images[0]  # Process only the first spectrogram
+                        sanitized_filename = re.sub(r'[<>:"/\\|?*]', '', filenames[0])
+                                          # Open debug log file
+                        debug_file_path = os.path.join(output_folder, "debug_log.txt")
+                        with open(debug_file_path, 'w') as debug_file:
+                            debug_file.write(f"\nDEBUG - {sanitized_filename}:\n")
+                            debug_file.write(f"Top 5 rows min/max: {[ (row.min(), row.max()) for row in img[:5] ]}\n")
+                            debug_file.write(f"Bottom 5 rows min/max: {[ (row.min(), row.max()) for row in img[-5:] ]}\n")
+                            debug_file.write(f"Overall min/max: {img.min()}, {img.max()}\n")
+                                            
+                            zero_rows = np.where(np.all(np.isclose(img, 0, atol=1e-6), axis=1))[0]
+                            debug_file.write(f"Fully zero Mel bands (row indices): {zero_rows}\n")
+                                           
+                            # Count and log unique values
+                            unique_vals, counts = np.unique(img, return_counts=True)
+                            debug_file.write("Unique values and counts (top 10):\n")
+                            for val, count in list(zip(unique_vals, counts))[:10]:
+                                debug_file.write(f"  Value: {val:.4f}, Count: {count}\n")
+                                             
+                            # Simulated reference value for normalization (e.g., np.max before conversion)
+                            debug_file.write(f"Simulated reference value (np.max): {np.max(img)}\n")
+                                               
                     for i, img in enumerate(images):
-                        sanitized_filename = re.sub(r'[<>:"/\\|?*]', '', filenames[i])
+                        sanitized_filename = re.sub(r'[<>:"/\\|?*]', '', filenames[i])  
                         #AJ is this potentially where the plot dimensions are set? C
                         #Changed figsize = (10,5) to (5,5)
                         plt.figure(figsize=(5, 5))
@@ -359,6 +410,7 @@ class GetCallsPage(Frame):
                         plt.close()
 
                     print(f"All images saved to {output_folder}")
+                  
 
     def extract_tweeps(self, data, folder_path, type, file_name):
                 # Create a popup window for the progress bar
