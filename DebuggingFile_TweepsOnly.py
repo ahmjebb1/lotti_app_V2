@@ -25,12 +25,18 @@ output_folder = os.getcwd()
 
 ### LOADING ###
 
+#List of files testes
+
+#240508_Nest_7_J_R1.wav, offset = 17.35, duration = 0.1
+#240315_Nest_4_R1.wav, offset = 213.3682, duration = 0.13
+#240404_Nest_47_R4, , offset = 205.3433, duration = 0.13
+
 #Testing librosa.load
     #Testing with a random section of a random file
-original_y, sr = librosa.load("C:/Users/bi1ahj/Desktop/Audio Data/24 Late Season Experiments/240508_Nest_7_J_R1.wav", offset = 17.35, duration = 0.10, sr = 48000)
+original_y, sr = librosa.load("C:/Users/bi1ahj/Desktop/Selection_Tables/250210_ML50_churr_dataset/Dataset/2024/FBL/Audio Data/240322_Nest_35_R1.wav", offset = 65.8848, duration = 0.13, sr = 48000)
 
 # Compute the Mel spectrogram for the denoised signal (Not originally in lotti App)
-original_S = librosa.feature.melspectrogram(y = original_y, sr=sr, n_fft=768, hop_length=16, n_mels=128, fmin=5000, fmax=11000)
+original_S = librosa.feature.melspectrogram(y = original_y, sr=sr, n_fft=768, hop_length=16, n_mels=128, fmin=4000, fmax=11000)
 
 #Summarise the shape
 print(f"ORIGINAL LOADING:")
@@ -38,6 +44,12 @@ print(f"Sample rate: {sr}")
 print(f"Waveform duration (calculated): {len(original_y) / sr:.3f} seconds")
 print(f"First 10 values of y: {original_y[:10]}")
 print(f"Min: {original_y.min():.4f}, Max: {original_y.max():.4f}")
+
+#Summarise the spectrogram
+print(f"DENOISING STEP:")
+print(f"Denoised Waveform Min: {original_S.min()}, Max: {original_S.max()}\n")
+print(f"Top 5 values: {original_S[:5]}\n")
+print(f"Bottom 5 values: {original_S[-5:]}\n")
 
 #Plot the original shape as a mel spectrogram
 #plt.figure(figsize=(10, 6))
@@ -56,7 +68,7 @@ plt.close()
 y = nr.reduce_noise(y=original_y, sr=sr, thresh_n_mult_nonstationary=12, n_fft=768)
 
 # Compute the Mel spectrogram for the denoised signal
-S = librosa.feature.melspectrogram(y = y, sr=sr, n_fft=768, hop_length=16, n_mels=128, fmin=5000, fmax=11000)
+S = librosa.feature.melspectrogram(y = y, sr=sr, n_fft=768, hop_length=16, n_mels=128, fmin=4000, fmax=11000)
 
 #Summarise
 print(f"DENOISING STEP:")
@@ -98,9 +110,9 @@ plt.close()
 ### NORMALIZE ###
 
 # Normalize the array to the range [0, 1]
-S_dB_norm = librosa.util.normalize(S_dB, axis=0)
+#S_dB_norm = librosa.util.normalize(S_dB, axis=0)
 # Manually scale to [0, 1]
-#S_dB_norm = (S_dB - S_dB.min()) / (S_dB.max() - S_dB.min())
+S_dB_norm = (S_dB - S_dB.min()) / (S_dB.max() - S_dB.min())
 
 #Summarise
 # Inspecting shape and basic statistics
@@ -148,7 +160,7 @@ print(f"Max value of S_dominant: {S_dominant.max()}")
 plt.figure(figsize=(10, 6))
 # Plot dominant-frequency-only spectrogram
 librosa.display.specshow(librosa.amplitude_to_db(S_dominant + 1e-10, ref=np.max),  # add small value to avoid log(0)
-                         sr=sr, hop_length=16, x_axis='time', y_axis='mel', fmin=5000, fmax=11000)
+                         sr=sr, hop_length=16, x_axis='time', y_axis='mel', fmin=4000, fmax=11000)
 plt.title("Dominant Frequencies Only")
 plt.colorbar(format="%+2.0f dB")
 plt.tight_layout()
@@ -188,8 +200,6 @@ for region in regionprops(labels):
 # Apply the cleaned mask to the original spectrogram
 cleaned_spectrogram = S_dB_norm * closed_mask
 
-#Plot
-
 # Plot the cleaned spectrogram
 plt.figure(figsize=(10, 4))
 librosa.display.specshow(cleaned_spectrogram, sr=sr, x_axis='time', y_axis='mel', cmap='magma')
@@ -221,7 +231,7 @@ print(f"Bottom 5 values: {cleaned_spectrogram[-5:]}\n")
 #        min_level = float(min_contour_level)
 
 
-#Alternative code to use manually set values
+#Alternative code to use manually set values (replaces Lotti App)
 num_contours = 25
 min_level = 0.1
 contour_levels = np.linspace(S_dB_norm.min() + (S_dB_norm.max() - S_dB_norm.min()) * min_level, S_dB_norm.max(), num_contours)
@@ -236,20 +246,78 @@ sums = np.sum(contour_array, axis = 0)
 peaks, _ = find_peaks(sums) 
 
 # ensure that there is no failure by creating a fail safe if no peaks are detected
-if len(peaks) > 0:
-        call_start = np.min(peaks[0]-50) # give a little bit of space before the call
-        # AJ increased the amount of space from 15 to 50
+if len(peaks) > 0: 
+    call_start = max(np.min(peaks[0]) - 40, 0)  # prevent negative
 else:
-        call_start = 1
+    call_start = 1 # give a little bit of space before the call
+
+# Compute frame energy (sum across frequency bins for each time frame)
+frame_energy = np.sum(S_dB_norm, axis=0)
+
+# Optional smoothing (can help with noise)
+# frame_energy = np.convolve(frame_energy, np.ones(5)/5, mode='same')
+
+# Plot the frame energy
+plt.figure(figsize=(12, 4))
+plt.plot(frame_energy, label='Frame Energy')
+plt.axvline(call_start, color='green', linestyle='--', label='Call Start')
+plt.title('Frame Energy Over Time')
+plt.xlabel('Frame Index')
+plt.ylabel('Summed Energy (across frequencies)')
+plt.legend()
+plt.tight_layout()
+plt.savefig("pl7_frame_energy.png")  # Saves to the working directory
+
+# Parameters
+silence_threshold = 2  # energy below this is considered silence
+min_blank_duration = 5  # number of consecutive frames to be considered a blank
+min_duration_before_end_check = 200  # number of frames to wait after call_start before looking for end
+
+# Compute the first frame index to begin looking for silence
+check_start_frame = call_start + min_duration_before_end_check
+
+# Ensure we don't exceed the frame range
+if check_start_frame >= len(frame_energy):
+    call_end_frame = len(frame_energy)
+else:
+    # Loop through each frame from check_start_frame onward
+    for i in range(check_start_frame, len(frame_energy) - min_blank_duration):
+        if np.all(frame_energy[i:i + min_blank_duration] < silence_threshold):
+            call_end_frame = i
+            break
+    else:
+        call_end_frame = len(frame_energy)  # fallback: take the rest
 
 # get the time of the start
     # Convert frame counts to time (seconds).
 start_time = librosa.frames_to_time(call_start, sr = sr, hop_length = 16)
 #AJ increased this from 0.1 to + 0.11
-end_times = start_time + 0.11
+#end_times = start_time + 0.11
+end_times = librosa.frames_to_time(call_end_frame, sr=sr, hop_length=16)
 end_frames = librosa.time_to_frames(end_times, sr = sr, hop_length = 16)
 # Select the section of the Mel spectrogram corresponding to x and x + 200ms (AJ changed not sure about new value)
 S_dB_section = contour_array[: , call_start:end_frames]
+
+#Summarise
+print(f"call_start: {call_start}")
+print(f"call_end_frame: {call_end_frame}")
+print(f"end_frames: {end_frames}")
+print(f"S_dB_section shape: {S_dB_section.shape}")
+print(f"contour_array shape: {contour_array.shape}")
+print(f"frame_energy length: {len(frame_energy)}")
+
+#Plot energy again
+plt.figure(figsize=(10, 3))
+plt.plot(frame_energy, color='black')
+plt.axhline(y=silence_threshold, color='red', linestyle='--', label='Silence Threshold')
+plt.axvline(x=call_start, color='green', linestyle='--', label='Call Start')
+plt.axvline(x=call_end_frame, color='blue', linestyle='--', label='Call End')
+plt.title("Frame Energy with Call Boundaries")
+plt.xlabel("Frame")
+plt.ylabel("Energy")
+plt.legend()
+plt.tight_layout()
+plt.savefig("pl9_frame_energy_debug.png", dpi=300)
 
 #Plot
 # Plot the extracted section of the spectrogram
@@ -259,7 +327,7 @@ plt.title("Extracted Section of Mel Spectrogram")
 plt.colorbar()
 plt.tight_layout()
 # Save the plot to file (optional)
-plt.savefig("pl7_extracted_spectrogram_section.png", dpi=300)
+plt.savefig("pl8_extracted_spectrogram_section.png", dpi=300)
 
 #Summarise
 print(f"EXTRACTED SPEC:")
