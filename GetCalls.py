@@ -1,4 +1,6 @@
 import os
+import logging
+import traceback
 import time
 import tkinter as tk
 from tkinter import Frame, StringVar, Label, Entry, Button, Toplevel, filedialog, messagebox, ttk, LabelFrame
@@ -14,6 +16,21 @@ import matplotlib.pyplot as plt
 import re
 from FilterCallsPage import FilterCallsPage
 
+#Logging an error message plus the full traceback to help identify where and how errors occur
+logging.basicConfig(
+    filename="spectrogram_log.txt",
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+
+def log_message(message):
+    logging.info(message)
+
+def log_error(error):
+    logging.error(error)
+    logging.error(traceback.format_exc())
+
+#Move onto Lotti processing code
 class GetCallsPage(Frame):
     def __init__(self, parent, controller):
             Frame.__init__(self, parent)
@@ -86,10 +103,26 @@ class GetCallsPage(Frame):
             self.region_size_combobox = ttk.Combobox(self.variable_frame, values=options_region_size, state="readonly")
             self.region_size_combobox.set(options_region_size[1])  # default value
             self.region_size_combobox.grid(row=4, column=2, sticky="nsew", padx=5, pady=5)
-            
+          
+            # Text box for noise onset
+            self.set_text_onset = Label(self.variable_frame, text = "Select noise onset (s.ms)")
+            self.set_text_onset.grid(row=5, column=1, sticky="nsew", padx=5, pady=5)
+            self.noise_onset_var = StringVar()
+            self.noise_onset_entry = Entry(self.variable_frame, textvariable=self.noise_onset_var)
+            self.noise_onset_entry.grid(row=5, column=2, sticky="nsew", padx=5, pady=5)
+
+            ## Text box for colour ring choice
+            self.set_text_cr = Label(self.variable_frame, text = "Select colour ring of interest")
+            self.set_text_cr.grid(row=6, column=1, sticky="nsew", padx=5, pady=5)
+            self.cr_var = StringVar()
+            self.cr_entry = Entry(self.variable_frame, textvariable=self.cr_var)
+            self.cr_entry.grid(row=6, column=2, sticky="nsew", padx=5, pady=5)
+
+            # Action button for 'run'
             self.button_8 = Button(self,text = "Run",command=lambda: (print("button_8 clicked"), self.button_8_click_get_calls()))
             self.button_8.grid(row = 3, column=0, sticky= "nsew", padx=5, pady=5, columnspan= 3)            
 
+            # Action button for 'filter calls'
             self.button_9 = Button(self,text = "Filter calls",command=lambda: (print("button_9 clicked"), self.open_popup()))
             self.button_9.grid(row = 4, column=0, sticky= "nsew", padx=5, pady=5, columnspan= 3)            
 
@@ -150,6 +183,9 @@ class GetCallsPage(Frame):
                     file_name = os.path.basename(file_path)
                     name = os.path.basename(file_path).split('.')[0]
 
+                    #Save the name for later use
+                    self.name = name
+
                     # Read the file into a pandas DataFrame
                     df = pd.read_csv(file_path, delimiter='\t')  # or adjust the delimiter as needed
 
@@ -176,81 +212,109 @@ class GetCallsPage(Frame):
                     # Optionally update other variables or return new file path
                     return new_file_path
                 else:
+                    self.name = None
                     return None
 
-            # these are the functions to extract the tweep from a Lotti churr call  
+    # these are the functions to extract the tweep from a Lotti churr call  
     def get_tweep(self, call, folder_path, start, call_id, selec):
-                                #AJ librosa.load parameters are as follows:
-                                    #offset - start reading after this time in seconds
-                                    #duration - only load up to this much audio in seconds
-                                    #sr - target sampling rate
-                                y, sr = librosa.load(folder_path + call, offset = start, duration = 0.6, sr = 48000)
+        try:
+                                
+                                # Only process if call_id matches colour ring input
+                                if call_id != self.cr_var.get():
+                                    return None, None
+                                
+                                full_id = f"{call_id}_{selec}"
+                                # log a message in the logging file listing the call details processed and the call onset
+                                log_message(f"\nProcessing: {call} | ID: {full_id} | Start: {start:.3f}")
+        
+                                #offset = start -> starts reading after a select time named "start".
+                                #duration -> loading up this much audio in seconds.
+                                #sr -> target sampling rate
+                                #y, sr = librosa.load(folder_path + call, offset = start, duration = 0.13, sr = 48000)
+                                y_stereo, sr = librosa.load(folder_path + call, offset = start, duration = 0.13, sr = 48000, mono=False)
 
-                                # --- Simplified waveform plot debug (Step 1) ---
-                                waveform_debug_path = os.path.join(os.getcwd(), "debug_waveform")
-                                if not os.path.exists(waveform_debug_path):
-                                    os.makedirs(waveform_debug_path)
+                                if y_stereo.ndim == 1:
+                                    y = y_stereo  # mono
+                                else:
+                                    log_message(f"Stereo audio detected in: {os.path.basename(folder_path)} — using channel 1 only")
+                                    y = y_stereo[0]  # channel 1 of stereo
 
-                                sanitized_filename = re.sub(r'[<>:"/\\|?*]', '', call_id)
+                                # log a message related to check if y loaded correctly
+                                log_message(f"Raw audio length: {len(y)}, max: {np.max(y):.5f}, min: {np.min(y):.5f}")
 
-                                # Use the waveform `y` and sample rate `sr` from earlier in the pipeline
-                                # Only process for the first file
-                                if len(images) > 0:
-                                    # Plot and save waveform
-                                    plt.figure(figsize=(10, 3))
-                                    plt.plot(y, color='gray')
-                                    plt.title(f"Waveform before noise reduction: {sanitized_filename}")
-                                    plt.xlabel("Samples")
-                                    plt.ylabel("Amplitude")
-                                    plt.tight_layout()
+                                #Apply a fade-in to remove artefacts introduced when slicing
+                                #Calculates how many samples are equivelent to 5ms
+                                fade_len = int(0.005 * sr)
+                                #Creates a linearly increasing array from 0 to 1 represents a volume envelope that ramps up from silence to full volume.
+                                #Applies the fade in to only the length = fade len
+                                #Each of the samples is multiplied by its corresponding fade value. 
+                                y[:fade_len] *= np.linspace(0, 1, fade_len)
+                                y[-fade_len:] *= np.linspace(1, 0, fade_len)
 
-                                    waveform_plot_file = os.path.join(waveform_debug_path, f"{sanitized_filename}_waveform.png")
-                                    plt.savefig(waveform_plot_file)
-                                    plt.close()
+                                # Noisereduce
+                                # Specify onset time and duration (in seconds) for noise sample
+                                # Retrieve from Lotti App inputs
 
-                                ## Noisereduce
-                                #AJ Switched n_fft from 512 to 768 (1.5 x original value)
-                                #AJ debugging switched n_fft to 1024
-                                # nr.reduce_noise reduces noise in bioacoustics using a method called spectral gating. The 
-                                # parameters are as follows:
-                                    # thresh_n_mult_nonstationary: Non-stationary Noise Reduction: Continuously updates the 
-                                    # estimated noise threshold over time. Default argument is 1.
-                                    # n_fft: int, optional length of the windowed signal after padding with zeros. 
-                                    # The number of rows in the STFT matrix ``D`` is ``(1 + n_fft/2)``. 
-                                    # The default value, ``n_fft=2048`` samples, corresponds to a physical 
-                                    # duration of 93 milliseconds at a sample rate of 22050 Hz. 
-                                    # This value is well adapted for music signals. However, in speech processing, 
-                                    # the recommended value is 512, corresponding to 23 milliseconds at a sample rate of 22050 Hz. 
-                                    # In any case, we recommend setting ``n_fft`` to a power of two for 
-                                    # optimizing the speed of the fast Fourier transform (FFT) algorithm., by default 1024
-                                y = nr.reduce_noise(y=y, sr=sr, thresh_n_mult_nonstationary = 12,  n_fft = 768)
+                                noise_onset_str = self.noise_onset_var.get()
+                                       
+                                if not noise_onset_str.strip():
+                                    log_error(f" - Error Missing noise onset time for ID: {full_id}")
+                                    return None, None
+
+                                # make sure noise onset is a float
+                                noise_onset_sec = float(noise_onset_str)
+
+                                # always the same value
+                                noise_duration_sec = 0.2  
+
+                                # Extract the noise clip & set audio file to extract noise from
+                                wav_filename = f"{self.name}.wav"
+                                noise_clip, _ = librosa.load(os.path.join(folder_path, wav_filename), offset = noise_onset_sec, duration = noise_duration_sec, sr=sr)
+
+                                # Apply stationary noise reduction
+                                y_stationary = nr.reduce_noise(
+                                    y = y,
+                                    y_noise=noise_clip,
+                                    hop_length=16,
+                                    sr=sr,
+                                    n_fft=768,
+                                    stationary=True,
+                                    n_std_thresh_stationary = 1.5
+                                )
+
+                                # Then apply non-stationary reduction
+                                y_nstationary = nr.reduce_noise(
+                                    y = y_stationary,
+                                    sr=sr,
+                                    hop_length=16,
+                                    n_fft=768,
+                                    thresh_n_mult_nonstationary = 8
+                                )
+
+                                # Log information after noise processing
+                                log_message(f"Post-noise-reduction max: {np.max(y_nstationary):.5f}, min: {np.min(y_nstationary):.5f}")
 
                                 # Compute the Mel spectrogram
-                                #AJ Switched n_fft from 512 to 768 (1.5 x original value)
-                                #AJ changed fmin 2000 to 5000)
-                                #AJ debugging: AJ switched fmin back to 2000, n_fft to 1024 and hop_length to 256
-                                #
                                     # computing a mel spectrogram using a time-series input
                                     # sr = sampling rate
                                     # hop_length: number of samples between successive frames.
-                                    # center: If True, the signal y is padded so that frame D[:, t] is centered at y[t * hop_length].
                                     # n_mels:number of Mel bands to generate, 
                                     # fmin: lowest frequency (in Hz) 
                                     # fmax: highest frequency (in Hz)
-                                S = librosa.feature.melspectrogram(y = y, sr=sr, n_fft = 768, hop_length=16, n_mels=128, fmin=5000, fmax=11000)
-
-                                # === Normalize using decibel scale ===
-                                S_dB = librosa.amplitude_to_db(S, ref=np.max)
+                                S = librosa.feature.melspectrogram(y = y_nstationary, sr=sr, n_fft = 768, hop_length=16, n_mels=128, fmin=4000, fmax=11000)
 
                                 # Convert to magnitude spectrogram (dB)
-                                #AJ
                                     #Convert an amplitude spectrogram to dB-scaled spectrogram
                                     # ref = If scalar, the amplitude abs(S) is scaled relative to ref: 20 * log10(S / ref).
                                     # Zeros in the output correspond to positions where S == ref.
                                 S_dB = librosa.amplitude_to_db(S, ref=np.max)
 
                                 # Normalize the array to the range [0, 1]
-                                S_dB_norm = librosa.util.normalize(S_dB, axis=0)
+                                # Manually scale to [0, 1]
+                                S_dB_norm = (S_dB - S_dB.min()) / (S_dB.max() - S_dB.min())
+
+                                # Log after normalizing the spectrogram and converting it
+                                log_message(f"S_dB min: {S_dB.min():.2f}, max: {S_dB.max():.2f}")
 
                                 # Find the index of the frequency with the highest magnitude at each time point
                                 dominant_indices = np.argmax(S, axis=0)
@@ -273,18 +337,13 @@ class GetCallsPage(Frame):
                                 # Set the minimum size of the regions to keep
                                 selected_size = self.region_size_combobox.get()
 
-                                if not selected_size:
-                                        min_size = 50
-                                else:
-                                        min_size = int(selected_size)
+                                if not selected_size.strip():
+                                    log_error(f" - Error  Missing region size for ID: {full_id}")
+                                    return None, None
+                                min_size = int(selected_size)
 
-                                # Iterate over the regions in the labeled image
                                 for region in regionprops(labels):
-                                    # Get the size of the region
-                                    size = region.area
-
-                                    # Remove the region if its size is smaller than the minimum size
-                                    if size <= min_size:
+                                    if region.area <= min_size:
                                         minr, minc, maxr, maxc = region.bbox
                                         closed_mask[minr:maxr, minc:maxc] = 0
 
@@ -293,17 +352,19 @@ class GetCallsPage(Frame):
 
                                 # Add frequency contours
                                 contour_number = self.contour_no_combobox.get()
-                                if not contour_number:
-                                        num_contours = 10
-                                else:
-                                        num_contours = int(contour_number)
                                 
-                                min_contour_level = self.contour_min_combobox.get()
-                                if not min_contour_level:
-                                        min_level = 0.4
-                                else:
-                                        min_level = float(min_contour_level)
+                                if not contour_number.strip():
+                                    log_error(f" - Error ❌ Missing contour number for ID: {full_id}")
+                                    return None, None
+                                num_contours = int(contour_number)
 
+                                # Contour minimum level validation
+                                min_contour_level = self.contour_min_combobox.get()
+                                if not min_contour_level.strip():
+                                    log_error(f" - Error ❌ Missing minimum contour level for ID: {full_id}")
+                                    return None, None
+                                min_level = float(min_contour_level)                            
+                                
                                 contour_levels = np.linspace(S_dB_norm.min() + (S_dB_norm.max() - S_dB_norm.min()) * min_level, S_dB_norm.max(), num_contours)
 
                                 # Create a single array that represents the contour plot
@@ -316,27 +377,53 @@ class GetCallsPage(Frame):
 
                                 peaks, _ = find_peaks(sums) 
 
-                                # ensure that there is no failure by creating a fail safe if no peaks are detected
-                                if len(peaks) > 0:
-                                        call_start = np.min(peaks[0]-50) # give a little bit of space before the call
-                                        # AJ increased the amount of space from 15 to 50
+                                # Ensure that there is no failure by creating a fail safe if no peaks are detected
+                                call_start = int(max(np.min(peaks) - 40, 0)) if len(peaks) > 0 else 1
+                                
+                                # Compute frame energy (sum across frequency bins for each time frame)
+                                frame_energy = np.sum(S_dB_norm, axis=0)
+
+                                # Energy parameters
+                                silence_threshold = 5  # energy below this is considered silence
+                                min_blank_duration = 4  # number of consecutive frames to be considered a blank
+                                min_duration_before_end_check = 200  # number of frames to wait after call_start before looking for end
+
+                                # Compute the first frame index to begin looking for silence
+                                check_start_frame = call_start + min_duration_before_end_check
+
+                                # Ensure we don't exceed the frame range
+                                if check_start_frame >= len(frame_energy):
+                                    call_end_frame = len(frame_energy)
                                 else:
-                                        call_start = 1
+                                    # Loop through each frame from check_start_frame onward
+                                    for i in range(check_start_frame, len(frame_energy) - min_blank_duration):
+                                        if np.all(frame_energy[i:i + min_blank_duration] < silence_threshold):
+                                            call_end_frame = i
+                                            break
+                                    else:
+                                        call_end_frame = len(frame_energy)  # fallback: take the rest
 
                                 # get the time of the start
                                     # Convert frame counts to time (seconds).
                                 start_time = librosa.frames_to_time(call_start, sr = sr, hop_length = 16)
-                                #AJ increased this from 0.1 to + 0.11
-                                end_times = start_time + 0.11
+                                # end_times
+                                end_times = librosa.frames_to_time(call_end_frame, sr=sr, hop_length = 16)
                                 end_frames = librosa.time_to_frames(end_times, sr = sr, hop_length = 16)
-
-                                # Select the section of the Mel spectrogram corresponding to x and x + 200ms (AJ changed not sure about new value)
+                                # Select the section of the Mel spectrogram corresponding to x and x + 200ms 
                                 S_dB_section = contour_array[: , call_start:end_frames]
-                                
-                                call_id = f'{call_id}_{selec}'
+                             
+                                #log message after trimming the final spectrogram product
+                                log_message(f"call_start: {call_start}, end_frames: {end_frames}")
+                                #call_id = f'{call_id}_{selec}'
 
-                                return S_dB_section, call_id
-        
+                                log_message(f" - Success (shape: {S_dB_section.shape})")
+                                
+                                return S_dB_section, full_id
+    
+        except Exception as e:
+                                log_error(f" - Error while processing {call_id}_{selec}: {e}")
+                                return None, None       
+    
     def save_to_pickle_get_calls(self, meta_data_var_label, X_calls, X_file_name, Y_calls, Y_file_name):
                     # Create the folder if it doesn't exist
                     output_folder = os.path.join(os.getcwd(), meta_data_var_label)
@@ -382,19 +469,13 @@ class GetCallsPage(Frame):
                             debug_file.write(f"Top 5 rows min/max: {[ (row.min(), row.max()) for row in img[:5] ]}\n")
                             debug_file.write(f"Bottom 5 rows min/max: {[ (row.min(), row.max()) for row in img[-5:] ]}\n")
                             debug_file.write(f"Overall min/max: {img.min()}, {img.max()}\n")
+                            
+                            #check file name
+                            debug_file.write(f"{self.name}\n")
                                             
                             zero_rows = np.where(np.all(np.isclose(img, 0, atol=1e-6), axis=1))[0]
                             debug_file.write(f"Fully zero Mel bands (row indices): {zero_rows}\n")
-                                           
-                            # Count and log unique values
-                            unique_vals, counts = np.unique(img, return_counts=True)
-                            debug_file.write("Unique values and counts (top 10):\n")
-                            for val, count in list(zip(unique_vals, counts))[:10]:
-                                debug_file.write(f"  Value: {val:.4f}, Count: {count}\n")
-                                             
-                            # Simulated reference value for normalization (e.g., np.max before conversion)
-                            debug_file.write(f"Simulated reference value (np.max): {np.max(img)}\n")
-                                               
+                                                                                     
                     for i, img in enumerate(images):
                         sanitized_filename = re.sub(r'[<>:"/\\|?*]', '', filenames[i])  
                         #AJ is this potentially where the plot dimensions are set? C
@@ -451,6 +532,9 @@ class GetCallsPage(Frame):
                     if os.path.exists(file_to_find):    
                                     x, y = self.get_tweep(row['sound.files'], folder_path, row['start'], row['ID'], row['Selection'])
                                     # we only want to store the array if it contains information
+                                    if x is None:
+                                        log_message(f"Skipped call {row['ID']}_{row['Selection']}")
+                                        continue
                                     if x.size > 0:
                                         X_calls.append(x)
                                         Y_calls.append(y) 
