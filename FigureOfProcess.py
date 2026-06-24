@@ -8,13 +8,12 @@ import pandas as pd
 import numpy as np
 import librosa
 import noisereduce as nr
-import pickle
 from scipy.signal import find_peaks
 from scipy.ndimage import binary_closing
 from skimage.measure import label, regionprops
 import matplotlib.pyplot as plt
-import re
-import soundfile as sf
+import matplotlib.gridspec as gridspec
+import librosa.display
 
 ### DIRECTORIES ###
 
@@ -26,59 +25,11 @@ output_folder = os.getcwd()
 
 ### LOADING ###
 
-#List of files tests
-    #Tests for tweep length selection
-    #240508_Nest_7_J_R1.wav, offset = 17.35, duration = 0.1
-    #240315_Nest_4_R1.wav, offset = 213.3682, duration = 0.13
-    #240404_Nest_47_R4, offset = 205.3433, duration = 0.13
-    #FBL, 240322_Nest_35_R1, offset = 65.8848, duration = 0.13
-    
-    #Tests for stationary noise reduction
-    #WgnL, 240322_Nest_22_R3.wav, offset = X, duration = 0.13 (river noise)
-        #Churr 1, X = 61.0816
-        #Churr 5, X = 65.0306
-        #Churr 53, X = 134.0987
-        #Churr 68, X = 155.2968
-        #Churr 102, X = 224.8613
-        #Noise onset = 0.8
-    #FBL, 240322_Nest_35_R1, offset = X, duration = 0.13 (not noisy)
-        #Churr 2, X = 64.2893 
-        #Churr 3, X = 65.1184
-        #Churr 6, X = 69.0060
-        #Churr 8, X = 71.4701
-        #Churr 12, X = 80.7313
-        #Noise onset = 0.1
-
-
-    #Tests for frame energy parameters
-    #DYL, 230415_Nest_64_R3.wav
-
-    #Test on why some spectrograms don't load at all
-    #DYL, 230416_Nest_64_R3.wav, offset = 23.2, duration = 0.13 (not noisy)
-        #Churr 1, X = 51.3053
-
 #Testing librosa.load
-#Set path
-audio_path = "C:/Users/bi1ahj/Desktop/Selection_Tables/250210_ML50_churr_dataset/Dataset/2024/BOR/Audio Data/240331_Nest_43_R1.wav" 
+#Set path of audio file
+audio_path = "C:/Users/bi1ahj/Desktop/Selection_Tables/250210_ML50_churr_dataset/Dataset/2023/BNL/Audio Data/230403_Nest_29_R2.wav" 
 #Testing with a random section of a random file (may need to alter offset dependent on churr focussing on)
-original_y, sr = librosa.load(audio_path, offset = 252.1189, duration = 0.13, sr = 48000)
-
-#Summarise the shape
-print(f"ORIGINAL LOADING WAVEFORM:")
-print(f"Sample rate: {sr}")
-print(f"Waveform duration (calculated): {len(original_y) / sr:.3f} seconds")
-print(f"First 10 values of y: {original_y[:10]}")
-print(f"Min: {original_y.min():.4f}, Max: {original_y.max():.4f}")
-
-#Plot original waveform
-plt.plot(original_y)
-plt.title("Loaded waveform")
-plt.xlabel("Sample")
-plt.ylabel("Amplitude")
-plt.title("Original Waveform")
-plt.tight_layout()
-plt.savefig("pl0_waveform_original.png")
-plt.close()
+original_y, sr = librosa.load(audio_path, offset = 571.1657, duration = 0.13, sr = 48000)
 
 #Apply a fade-in to remove artefacts introduced when slicing
 #Calculates how many samples are equivelent to 5ms
@@ -91,28 +42,21 @@ original_y[:fade_len] *= np.linspace(0, 1, fade_len)
 # Compute the Mel spectrogram (Not originally in lotti App)
 original_S = librosa.feature.melspectrogram(y = original_y, sr=sr, n_fft=768, hop_length=16, n_mels=128, fmin=4000, fmax=11000)
 
-#Summarise the spectrogram
-print(f"SPECTROGRAM WITH FADE:")
-print(f"First Spectrogram Min: {original_S.min()}, Max: {original_S.max()}\n")
-print(f"Top 5 values: {original_S[:5]}\n")
-print(f"Bottom 5 values: {original_S[-5:]}\n")
-print(f"Number of frames: {original_S.shape[1]}")
-
 #Plot the original shape as a mel spectrogram
 #plt.figure(figsize=(10, 6))
-librosa.display.specshow(original_S, x_axis='time', y_axis='mel', sr=sr)
+librosa.display.specshow(original_S, x_axis='time', y_axis='mel', sr=sr, cmap = "hot")
 plt.colorbar()
-plt.title("Original Mel Spectrogram before any data transformations")
+plt.title("1")
 plt.tight_layout()
 
 # Save the spectrogram to the working directory
-plt.savefig(os.path.join(output_folder, "pl1_mel_spectrogram_original.png"))
+plt.savefig(os.path.join(output_folder, "pl1_paper_original_spec.png"))
 plt.close()
 
 ### NOISE REDUCTION ###
 
 # Specify onset time and duration (in seconds) for noise sample
-noise_onset_sec = 2.0     # e.g., start at 0.4 seconds
+noise_onset_sec = 0.8     # e.g., start at 0.4 seconds
 noise_duration_sec = 0.2  # e.g., use 0.2 seconds of noise
 
 # Convert to sample indices
@@ -139,7 +83,7 @@ y = nr.reduce_noise(
     sr=sr,
     hop_length=16,
     n_fft=768,
-    thresh_n_mult_nonstationary = 8
+    thresh_n_mult_nonstationary = 12
 )
 
 #Run the noise reduction
@@ -147,18 +91,6 @@ y = nr.reduce_noise(
 
 # Compute the Mel spectrogram for the denoised signal
 S = librosa.feature.melspectrogram(y = y, sr=sr, n_fft=768, hop_length=16, n_mels=128, fmin=4000, fmax=11000)
-
-#Summarise
-print(f"DENOISING STEP WAVEFORM:")
-print(f"Denoised Waveform Min: {y.min()}, Max: {y.max()}\n")
-print(f"Top 5 values: {y[:5]}\n")
-print(f"Bottom 5 values: {y[-5:]}\n")
-
-print(f"DENOISING STEP SPECTROGRAM:")
-print(f"Denoised Spectrogram Min: {S.min()}, Max: {S.max()}\n")
-print(f"Top 5 values: {S[:5]}\n")
-print(f"Bottom 5 values: {S[-5:]}\n")
-
 
 #Plot the denoised signal as a mel spectrogram
 #plt.figure(figsize=(10, 6))
@@ -168,27 +100,22 @@ plt.title("Mel Spectrogram after denoising")
 plt.tight_layout()
 
 # Save the spectrogram to the working directory
-plt.savefig(os.path.join(output_folder, "pl2_mel_spectrogram_denoised.png"))
+plt.savefig(os.path.join(output_folder, "pl2_paper_denoised.png"))
 plt.close()
 
 ### DB SPEC ###
 S_dB = librosa.amplitude_to_db(S, ref=np.max)
 
-#Summarize
-print(f"MAGNITUDE SPEC:")
-print(f"DB Spec Min: {S_dB.min()}, Max: {S_dB.max()}\n")
-print(f"Top 5 values: {S_dB[:5]}\n")
-print(f"Bottom 5 values: {S_dB[-5:]}\n")
-
 # Plot the spectrogram
 plt.figure(figsize=(10, 6))
-librosa.display.specshow(S_dB, x_axis='time', y_axis='mel', sr=sr)
+librosa.display.specshow(S_dB, x_axis='time', y_axis='mel', sr=sr, cmap = "hot")
 plt.colorbar(format='%+2.0f dB')
 plt.title("Mel Spectrogram After Noise Reduction And Converted to dB")
 plt.tight_layout()
 
+
 # Save the spectrogram to the working directory
-plt.savefig(os.path.join(output_folder, "pl3_mel_spectrogram_dB.png"))
+plt.savefig(os.path.join(output_folder, "pl3_paper_dB.png"))
 plt.close()
 
 ### NORMALIZE ###
@@ -198,23 +125,17 @@ plt.close()
 # Manually scale to [0, 1]
 S_dB_norm = (S_dB - S_dB.min()) / (S_dB.max() - S_dB.min())
 
-#Summarise
-print(f"NORMALIZED DATA:")
-print(f"Normalized Spec Min: {S_dB_norm.min()}, Max: {S_dB_norm.max()}\n")
-print(f"Top 5 values: {S_dB_norm[:5]}\n")
-print(f"Bottom 5 values: {S_dB_norm[-5:]}\n")
-
 ### PLOT ###
 
 # Save the plot to the current working directory
 plt.figure(figsize=(10, 6))
-plt.imshow(S_dB_norm, aspect='auto', origin='lower', cmap='viridis')
+plt.imshow(S_dB_norm, aspect='auto', origin='lower', cmap = "hot")
 plt.title("Normalized Mel Spectrogram")
 plt.xlabel("Time (frames)")
 plt.ylabel("Frequency (Hz)")
 plt.colorbar(format="%+2.0f dB")
 plt.tight_layout()
-plt.savefig(os.path.join(os.getcwd(), "pl4_normalized_mel_spectrogram.png"))
+plt.savefig(os.path.join(os.getcwd(), "pl4_paper_normalized.png"))
 plt.close()
 
 ### NEW SPEC OF DOM FREQ ###
@@ -232,10 +153,6 @@ S_dominant[tuple(indices_array.T)] = S[tuple(indices_array.T)]
 
 #Summarize
 
-# Inspect the array to see if there are regions of 0s causing the border
-print(f"Min value of S_dominant: {S_dominant.min()}")
-print(f"Max value of S_dominant: {S_dominant.max()}")
-
 #Plot
 # Set up plot
 plt.figure(figsize=(10, 6))
@@ -246,7 +163,7 @@ plt.title("Dominant Frequencies Only")
 plt.colorbar(format="%+2.0f dB")
 plt.tight_layout()
 # Save to current working directory
-plt.savefig("pl5_dominantfrequency_spectrogram.png") 
+plt.savefig("pl5_paper_dominantfrequency.png") 
 
 ### APPLY MASK ##
 
@@ -283,33 +200,11 @@ cleaned_spectrogram = S_dB_norm * closed_mask
 
 # Plot the cleaned spectrogram
 plt.figure(figsize=(10, 4))
-librosa.display.specshow(cleaned_spectrogram, sr=sr, x_axis='time', y_axis='mel', cmap='magma')
+librosa.display.specshow(cleaned_spectrogram, sr=sr, x_axis='time', y_axis='mel', cmap = "hot")
 plt.colorbar()
 plt.title("Cleaned Spectrogram After Morphological Filtering")
 plt.tight_layout()
-plt.savefig("pl6_cleaned_spectrogram.png")  # Saves to the working directory
-
-#Summarise
-print(f"CLEANED SPEC:")
-print(f"Spec Min: {cleaned_spectrogram.min()}, Max: {cleaned_spectrogram.max()}\n")
-print(f"Top 5 values: {cleaned_spectrogram[:5]}\n")
-print(f"Bottom 5 values: {cleaned_spectrogram[-5:]}\n")
-
-### CONTOURS ###
-
-# Add frequency contours
-# Original code to use values in lotti app
-#contour_number = self.contour_no_combobox.get()
-#if not contour_number:
-#        num_contours = 10
-#else:
-#        num_contours = int(contour_number)
-#
-#min_contour_level = self.contour_min_combobox.get()
-#if not min_contour_level:
-#        min_level = 0.4
-#else:
-#        min_level = float(min_contour_level)
+plt.savefig("pl6_paper_postmask.png")  # Saves to the working directory
 
 
 #Alternative code to use manually set values (replaces Lotti App)
@@ -338,20 +233,9 @@ frame_energy = np.sum(S_dB_norm, axis=0)
 # Optional smoothing (can help with noise)
 # frame_energy = np.convolve(frame_energy, np.ones(5)/5, mode='same')
 
-# Plot the frame energy
-plt.figure(figsize=(12, 4))
-plt.plot(frame_energy, label='Frame Energy')
-plt.axvline(call_start, color='green', linestyle='--', label='Call Start')
-plt.title('Frame Energy Over Time')
-plt.xlabel('Frame Index')
-plt.ylabel('Summed Energy (across frequencies)')
-plt.legend()
-plt.tight_layout()
-plt.savefig("pl7_frame_energy.png")  # Saves to the working directory
-
 # Parameters
-silence_threshold = 5  # energy below this is considered silence
-min_blank_duration = 4 # number of consecutive frames to be considered a blank
+silence_threshold = 2  # energy below this is considered silence
+min_blank_duration = 5  # number of consecutive frames to be considered a blank
 min_duration_before_end_check = 200  # number of frames to wait after call_start before looking for end
 
 # Compute the first frame index to begin looking for silence
@@ -379,15 +263,7 @@ end_frames = librosa.time_to_frames(end_times, sr = sr, hop_length = 16)
 # Select the section of the Mel spectrogram corresponding to x and x + 200ms (AJ changed not sure about new value)
 S_dB_section = contour_array[: , call_start:end_frames]
 
-#Summarise
-print(f"call_start: {call_start}")
-print(f"call_end_frame: {call_end_frame}")
-print(f"end_frames: {end_frames}")
-print(f"S_dB_section shape: {S_dB_section.shape}")
-print(f"contour_array shape: {contour_array.shape}")
-print(f"frame_energy length: {len(frame_energy)}")
-
-#Plot energy again
+#Plot energy 
 plt.figure(figsize=(10, 3))
 plt.plot(frame_energy, color='black')
 plt.axhline(y=silence_threshold, color='red', linestyle='--', label='Silence Threshold')
@@ -398,52 +274,37 @@ plt.xlabel("Frame")
 plt.ylabel("Energy")
 plt.legend()
 plt.tight_layout()
-plt.savefig("pl9_frame_energy_debug.png", dpi=300)
+plt.savefig("pl8_paper_frame_energy.png", dpi=300)
 
 # Plot the extracted section of the spectrogram
-plt.figure(figsize=(5, 5))
-librosa.display.specshow(S_dB_section, sr=sr, x_axis='time', y_axis='mel', cmap='magma')
+plt.figure(figsize=(7, 5))
+librosa.display.specshow(S_dB_section, sr=sr, x_axis='time', y_axis='mel', cmap = "hot")
 plt.title("Extracted Section of Mel Spectrogram")
 plt.colorbar()
 plt.tight_layout()
 # Save the plot to file (optional)
-plt.savefig("pl8_extracted_spectrogram_section.png", dpi=300)
+plt.savefig("pl9_paper_extracted_spectrogram_section.png", dpi=300)
 
-#Summarise
-print(f"EXTRACTED SPEC:")
-print(f"Spec Min: {S_dB_section.min()}, Max: {S_dB_section.max()}\n")
-print(f"Top 5 values: {S_dB_section[:5]}\n")
-print(f"Bottom 5 values: {S_dB_section[-5:]}\n")
+#### COMBINE FIGURES #####
 
-### TRANSFORM BACK TO AUDIO ###
+# Create a custom grid layout: 2 rows, 2 columns
+fig = plt.figure(figsize=(10, 8))
+gs = gridspec.GridSpec(2, 2, height_ratios=[1, 1])  # top row 2 cols, bottom row spans both
 
-#FINAL SPECTROGRAM
-#Convert dB spectrogram back to amplitude
-S_amp = librosa.db_to_amplitude(S_dB_section)
+# First plot (top-left)
+ax1 = fig.add_subplot(gs[0, 0])
+librosa.display.specshow(S1, sr=sr, x_axis='time', y_axis='mel', ax=ax1, cmap='magma')
+ax1.set_title("Spectrogram 1")
 
-#Invert Mel spectrogram to waveform using Griffin-Lim
-#Causes some distortion to sound so is it effective for what we want?
-#y_reconstructed = librosa.feature.inverse.mel_to_audio(
-#    S_amp,
-#    sr=sr,
-#    hop_length=16,
-#    n_fft=768
-#)
-#
-##Save the file to the working directory
-## Create filename
-#spectrogram_filename = f"reconstructed.wav"
-#
-## Combine with folder path
-#output_path = os.path.join(output_folder, spectrogram_filename)
-#
-## Write the audio
-#sf.write(output_path, y_reconstructed, sr)
+# Second plot (top-right)
+ax2 = fig.add_subplot(gs[0, 1])
+librosa.display.specshow(S2, sr=sr, x_axis='time', y_axis='mel', ax=ax2, cmap='plasma')
+ax2.set_title("Spectrogram 2")
 
-#WAVEFORM POST NOISE REDUCTION
+# Third plot (bottom, spanning both columns)
+ax3 = fig.add_subplot(gs[1, :])  # use all columns of row 1
+librosa.display.specshow(S3, sr=sr, x_axis='time', y_axis='mel', ax=ax3, cmap='inferno')
+ax3.set_title("Full-width Spectrogram")
 
-#designate file name
-output_filename = os.path.join(output_folder, f"waveform_reconstructed.wav")
-
-#write the post-noise reduction waveform to a .wav file
-sf.write(output_filename, y, sr)
+plt.tight_layout()
+plt.show()

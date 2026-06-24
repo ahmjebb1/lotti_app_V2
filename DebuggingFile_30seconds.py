@@ -27,44 +27,16 @@ output_folder = os.getcwd()
 ### LOADING ###
 
 #List of files tests
-    #Tests for tweep length selection
-    #240508_Nest_7_J_R1.wav, offset = 17.35, duration = 0.1
-    #240315_Nest_4_R1.wav, offset = 213.3682, duration = 0.13
-    #240404_Nest_47_R4, offset = 205.3433, duration = 0.13
-    #FBL, 240322_Nest_35_R1, offset = 65.8848, duration = 0.13
-    
-    #Tests for stationary noise reduction
-    #WgnL, 240322_Nest_22_R3.wav, offset = X, duration = 0.13 (river noise)
-        #Churr 1, X = 61.0816
-        #Churr 5, X = 65.0306
-        #Churr 53, X = 134.0987
-        #Churr 68, X = 155.2968
-        #Churr 102, X = 224.8613
-        #Noise onset = 0.8
-    #FBL, 240322_Nest_35_R1, offset = X, duration = 0.13 (not noisy)
-        #Churr 2, X = 64.2893 
-        #Churr 3, X = 65.1184
-        #Churr 6, X = 69.0060
-        #Churr 8, X = 71.4701
-        #Churr 12, X = 80.7313
-        #Noise onset = 0.1
-
-
-    #Tests for frame energy parameters
-    #DYL, 230415_Nest_64_R3.wav
-
-    #Test on why some spectrograms don't load at all
-    #DYL, 230416_Nest_64_R3.wav, offset = 23.2, duration = 0.13 (not noisy)
-        #Churr 1, X = 51.3053
+#ID = WgnL, file name = 240322_Nest_22_R3.wav
 
 #Testing librosa.load
 #Set path
-audio_path = "C:/Users/bi1ahj/Desktop/Selection_Tables/250210_ML50_churr_dataset/Dataset/2024/BOR/Audio Data/240331_Nest_43_R1.wav" 
-#Testing with a random section of a random file (may need to alter offset dependent on churr focussing on)
-original_y, sr = librosa.load(audio_path, offset = 252.1189, duration = 0.13, sr = 48000)
+audio_path = "C:/Users/bi1ahj/Desktop/Selection_Tables/250210_ML50_churr_dataset/Dataset/2024/WgnL/Audio Data/240322_Nest_22_R3.wav" 
+#Testing with the first 30 seconds of a file
+original_y, sr = librosa.load(audio_path, offset = 0, duration = 30, sr = 48000)
 
 #Summarise the shape
-print(f"ORIGINAL LOADING WAVEFORM:")
+print(f"ORIGINAL LOADING:")
 print(f"Sample rate: {sr}")
 print(f"Waveform duration (calculated): {len(original_y) / sr:.3f} seconds")
 print(f"First 10 values of y: {original_y[:10]}")
@@ -88,15 +60,14 @@ fade_len = int(0.005 * sr)
 #Each of the samples is multiplied by its corresponding fade value. 
 original_y[:fade_len] *= np.linspace(0, 1, fade_len)
 
-# Compute the Mel spectrogram (Not originally in lotti App)
+# Compute the Mel spectrogram for the denoised signal (Not originally in lotti App)
 original_S = librosa.feature.melspectrogram(y = original_y, sr=sr, n_fft=768, hop_length=16, n_mels=128, fmin=4000, fmax=11000)
 
 #Summarise the spectrogram
-print(f"SPECTROGRAM WITH FADE:")
-print(f"First Spectrogram Min: {original_S.min()}, Max: {original_S.max()}\n")
+print(f"DENOISING STEP:")
+print(f"Denoised Waveform Min: {original_S.min()}, Max: {original_S.max()}\n")
 print(f"Top 5 values: {original_S[:5]}\n")
 print(f"Bottom 5 values: {original_S[-5:]}\n")
-print(f"Number of frames: {original_S.shape[1]}")
 
 #Plot the original shape as a mel spectrogram
 #plt.figure(figsize=(10, 6))
@@ -112,7 +83,7 @@ plt.close()
 ### NOISE REDUCTION ###
 
 # Specify onset time and duration (in seconds) for noise sample
-noise_onset_sec = 2.0     # e.g., start at 0.4 seconds
+noise_onset_sec = 0.8     # e.g., start at 0.4 seconds
 noise_duration_sec = 0.2  # e.g., use 0.2 seconds of noise
 
 # Convert to sample indices
@@ -125,40 +96,34 @@ noise_clip, _ = librosa.load(audio_path, offset = noise_onset_sec, duration = no
 # Apply stationary noise reduction
 y_stationary = nr.reduce_noise(
     y=original_y,
-    y_noise=noise_clip,
+    y_noise = noise_clip,
     hop_length=16,
     sr=sr,
-    n_fft=768,
-    stationary=True,
-    n_std_thresh_stationary = 1
+    n_fft = 768,
+    stationary = True,
+    n_std_thresh_stationary = 0.75
 )
 
-# Then apply non-stationary reduction
-y = nr.reduce_noise(
-    y=y_stationary,
-    sr=sr,
-    hop_length=16,
-    n_fft=768,
-    thresh_n_mult_nonstationary = 8
-)
+#Then apply non-stationary reduction
+#y = nr.reduce_noise(
+#    y=y_stationary,
+#    sr=sr,
+#    hop_length=16,
+#    n_fft=768,
+#    thresh_n_mult_nonstationary = 12
+#)
 
 #Run the noise reduction
 #y = nr.reduce_noise(y=original_y, sr=sr, thresh_n_mult_nonstationary=12, n_fft=768)
 
 # Compute the Mel spectrogram for the denoised signal
-S = librosa.feature.melspectrogram(y = y, sr=sr, n_fft=768, hop_length=16, n_mels=128, fmin=4000, fmax=11000)
+S = librosa.feature.melspectrogram(y = y_stationary, sr=sr, n_fft=768, hop_length=16, n_mels=128, fmin=4000, fmax=11000)
 
 #Summarise
-print(f"DENOISING STEP WAVEFORM:")
-print(f"Denoised Waveform Min: {y.min()}, Max: {y.max()}\n")
-print(f"Top 5 values: {y[:5]}\n")
-print(f"Bottom 5 values: {y[-5:]}\n")
-
-print(f"DENOISING STEP SPECTROGRAM:")
-print(f"Denoised Spectrogram Min: {S.min()}, Max: {S.max()}\n")
-print(f"Top 5 values: {S[:5]}\n")
-print(f"Bottom 5 values: {S[-5:]}\n")
-
+#print(f"DENOISING STEP:")
+#print(f"Denoised Waveform Min: {y.min()}, Max: {y.max()}\n")
+#print(f"Top 5 values: {y[:5]}\n")
+#print(f"Bottom 5 values: {y[-5:]}\n")
 
 #Plot the denoised signal as a mel spectrogram
 #plt.figure(figsize=(10, 6))
@@ -199,10 +164,13 @@ plt.close()
 S_dB_norm = (S_dB - S_dB.min()) / (S_dB.max() - S_dB.min())
 
 #Summarise
+# Inspecting shape and basic statistics
 print(f"NORMALIZED DATA:")
-print(f"Normalized Spec Min: {S_dB_norm.min()}, Max: {S_dB_norm.max()}\n")
-print(f"Top 5 values: {S_dB_norm[:5]}\n")
-print(f"Bottom 5 values: {S_dB_norm[-5:]}\n")
+print(f"Shape of S_dB_norm: {S_dB_norm.shape}")
+print(f"Min value: {S_dB_norm.min()}")
+print(f"Max value: {S_dB_norm.max()}")
+print(f"Mean value: {S_dB_norm.mean()}")
+print(f"Standard deviation: {S_dB_norm.std()}")
 
 ### PLOT ###
 
@@ -350,8 +318,8 @@ plt.tight_layout()
 plt.savefig("pl7_frame_energy.png")  # Saves to the working directory
 
 # Parameters
-silence_threshold = 5  # energy below this is considered silence
-min_blank_duration = 4 # number of consecutive frames to be considered a blank
+silence_threshold = 2  # energy below this is considered silence
+min_blank_duration = 5  # number of consecutive frames to be considered a blank
 min_duration_before_end_check = 200  # number of frames to wait after call_start before looking for end
 
 # Compute the first frame index to begin looking for silence
@@ -443,7 +411,11 @@ S_amp = librosa.db_to_amplitude(S_dB_section)
 #WAVEFORM POST NOISE REDUCTION
 
 #designate file name
-output_filename = os.path.join(output_folder, f"waveform_reconstructed.wav")
+#unprocessed_filename = os.path.join(output_folder, f"unprocessed_waveform_reconstructed.wav")
+processed_filename = os.path.join(output_folder, f"processed_waveform_reconstructed.wav")
 
-#write the post-noise reduction waveform to a .wav file
-sf.write(output_filename, y, sr)
+#write the post-noise reduction waveform to a .wav file 
+sf.write(processed_filename, y_stationary, sr)
+
+#write the original waveform to a wav.file 
+#sf.write(unprocessed_filename, original_y, sr)
