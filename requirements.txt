@@ -7,3 +7,9 @@ matplotlib==3.9.2
 tqdm==4.67.1
 scipy==1.14.1
 pyinstaller
+
+# further requires ffmpeg to be installed on the system for librosa to work properly
+# to do this on windows you can open command prompt and run the following command:
+# winget install ffmpeg
+
+# to achieve this on other devices, you can follow the instructions on the official ffmpeg website: https://ffmpeg.org/download.html

@@ -15,6 +15,7 @@ from skimage.measure import label, regionprops
 import matplotlib.pyplot as plt
 import re
 from FilterCallsPage import FilterCallsPage
+import subprocess
 
 #Logging an error message plus the full traceback to help identify where and how errors occur
 logging.basicConfig(
@@ -215,6 +216,17 @@ class GetCallsPage(Frame):
                     self.name = None
                     return None
 
+    # preprocessing for RF64 files to be loaded and converted to standard waves
+    def convert_rf64(self, input_path, output_path):
+        subprocess.run([
+            "ffmpeg",
+            "-y",
+            "-i", input_path,
+            "-c:a", "pcm_s16le",
+            output_path
+        ])
+
+
     # these are the functions to extract the tweep from a Lotti churr call  
     def get_tweep(self, call, folder_path, start, call_id, selec):
         try:
@@ -227,12 +239,34 @@ class GetCallsPage(Frame):
                                 # log a message in the logging file listing the call details processed and the call onset
                                 log_message(f"\nProcessing: {call} | ID: {full_id} | Start: {start:.3f}")
         
+
+                                input_path = os.path.join(folder_path, call)
+                                
+                                # Create a converted filename
+                                fixed_path = os.path.join(
+                                    folder_path,
+                                    call.replace(".WAV", "_fixed.wav")
+                                )
+                                
+                                # Convert RF64 if needed
+                                if not os.path.exists(fixed_path):
+                                    log_message(f"Creating compatible WAV copy: {call}")
+                                    self.convert_rf64(input_path, fixed_path)
+                                
                                 #offset = start -> starts reading after a select time named "start".
                                 #duration -> loading up this much audio in seconds.
                                 #sr -> target sampling rate
                                 #y, sr = librosa.load(folder_path + call, offset = start, duration = 0.13, sr = 48000)
-                                y_stereo, sr = librosa.load(folder_path + call, offset = start, duration = 0.13, sr = 48000, mono=False)
+                                # Original audio path
+                                y_stereo, sr = librosa.load(
+                                    fixed_path,
+                                    offset=start,
+                                    duration=0.13,
+                                    sr=48000,
+                                    mono=False
+                                )
 
+                                # conditional fix for stereo audio
                                 if y_stereo.ndim == 1:
                                     y = y_stereo  # mono
                                 else:
