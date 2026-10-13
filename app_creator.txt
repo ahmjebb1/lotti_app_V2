@@ -1,14 +1,28 @@
-pip install pyinstaller
-
-#Create environment (if doesn't exist already).
-python -m venv env
+#Create environment (if doesn't exist already). Note we are forcing the use of a python version that is currently compatible with pyinstaller.
+py -3.12 -m venv env
 
 #Activate the environment if already created.
 env\Scripts\activate
 
+#Check python version again 
+python --version
+
 #Install the packages from the requirements text file.
 pip install -r requirements.txt
+pip install pyinstaller
 
-#Install the app.
+#Install the app (old version).
 pyinstaller --optimize 2 --onefile --windowed LottiCallerApp.py GetCalls.py FilterCallsPage.py
+
+#Install the app (new version)
+pyinstaller --noconfirm --onedir --windowed --collect-all scipy --collect-all noisereduce LottiCallerApp.py GetCalls.py FilterCallsPage.py
+#### Notes ####
+# pyinstaller - base command invoking pyinstaller to package python scripts and their dependencies into an executable program.
+# --no confirm - overwrites dist and build without asking for manual confirmation when the command is run.
+# --onedir tells to package the application into a folder containing multiple files .exe and .dll and .pyd rather than file compression.
+# The above --onedir replaces --onefile as --onefile is known to break libraries like scipy and numpy.
+# --windowed surpresses the black command prompt that usually accompanies launch.
+# --collec-all scipy and --collect-all noisereduce forces pyinstaller to bundle and search for all submodules, binary extensions, metadata and data files associated with these packages.
+# the addition of these above lines helps with import errors.
+
  
